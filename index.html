@@ -1,154 +1,84 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Çevrimiçi Mesajlaşma</title>
-<style>
-  body { font-family: Arial; margin:0; display:flex; flex-direction: column; height:100vh; }
-  header { background:#007bff; color:#fff; padding:10px; text-align:center; font-weight:bold; }
-  #chat { flex:1; overflow-y:auto; padding:15px; background:#fff; border-top:1px solid #ccc; border-bottom:1px solid #ccc; }
-  .message { margin-bottom:10px; padding:8px 12px; border-radius:10px; max-width: 70%; word-wrap: break-word; }
-  .message.you { background:#d1ecf1; color:#0c5460; align-self:flex-end; }
-  .message.friend { background:#e2e3e5; color:#383d41; align-self:flex-start; }
-  #input-area { display:flex; padding:10px; background:#eee; }
-  #input-area input[type="text"] { flex:1; padding:10px; font-size:1em; border:1px solid #ccc; border-radius:5px; }
-  #input-area button { margin-left:10px; background:#007bff; color:#fff; border:none; padding:10px 15px; font-size:1em; border-radius:5px; cursor:pointer; }
-  #input-area button:disabled { background:#999; cursor:not-allowed; }
-  #username-setter { background:#fff; padding:15px; text-align:center; }
-  #username-setter input { padding:10px; font-size:1.2em; width:200px; border:1px solid #ccc; border-radius:5px; }
-  #username-setter button { padding:10px 15px; font-size:1.2em; margin-left:10px; border:none; background:#007bff; color:#fff; border-radius:5px; cursor:pointer; }
-</style>
+  <meta charset="UTF-8" />
+  <title>Mesajlaşma Uygulaması</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; background: #f7f7f7; }
+    h1 { text-align: center; }
+    #messages { background: white; border: 1px solid #ccc; height: 400px; overflow-y: scroll; padding: 10px; }
+    .msg { padding: 5px; margin: 5px 0; border-bottom: 1px solid #eee; }
+    .mine { background: #dcf8c6; }
+    #form { display: flex; margin-top: 10px; }
+    #input { flex: 1; padding: 8px; }
+    #send { padding: 8px; }
+  </style>
 </head>
 <body>
+  <h1>Mesajlaşma</h1>
 
-<header>Çevrimiçi Mesajlaşma</header>
+  <div>
+    <label>Kullanıcı adınız: <input id="username" placeholder="Adınız" /></label>
+    <button id="connect">Bağlan</button>
+  </div>
 
-<div id="username-setter">
-  <input type="text" id="username" placeholder="Adını yaz" maxlength="20" />
-  <button id="setUsernameBtn" disabled>Başla</button>
-</div>
+  <div id="messages"></div>
 
-<div id="chat" style="display:none; flex-direction: column;"></div>
+  <div id="form" style="display:none;">
+    <input id="input" autocomplete="off" placeholder="Mesajınızı yazın..." />
+    <button id="send">Gönder</button>
+  </div>
 
-<div id="input-area" style="display:none;">
-  <input type="text" id="messageInput" placeholder="Mesaj yaz..." maxlength="200" />
-  <button id="sendBtn" disabled>Gönder</button>
-</div>
+  <script>
+    let ws;
+    let myName = "";
 
-<script>
-(() => {
-  let username = null;
-  const chatEl = document.getElementById('chat');
-  const inputArea = document.getElementById('input-area');
-  const usernameSetter = document.getElementById('username-setter');
-  const usernameInput = document.getElementById('username');
-  const setUsernameBtn = document.getElementById('setUsernameBtn');
-  const messageInput = document.getElementById('messageInput');
-  const sendBtn = document.getElementById('sendBtn');
-
-  // Buraya Render’da yayınladığın server adresini yaz
-  // Örneğin: "wss://mesaj-server.onrender.com"
-  const WS_SERVER_URL = "https://mesaj-server.onrender.com/";
-
-  let ws = null;
-
-  // HTML özel karakter kaçış
-  function escapeHtml(text) {
-    const map = {
-      '&': "&amp;",
-      '<': "&lt;",
-      '>': "&gt;",
-      '"': "&quot;",
-      "'": "&#039;"
-    };
-    return text.replace(/[&<>"']/g, m => map[m]);
-  }
-
-  // Mesajları ekrana yazdır
-  function addMessage(user, text, isYou) {
-    const div = document.createElement('div');
-    div.classList.add('message');
-    div.classList.add(isYou ? 'you' : 'friend');
-    const timeStr = new Date().toLocaleTimeString();
-    div.innerHTML = `<b>${escapeHtml(user)}</b> <small style="font-size:0.7em;color:#666;">${timeStr}</small><br>${escapeHtml(text)}`;
-    chatEl.appendChild(div);
-    chatEl.scrollTop = chatEl.scrollHeight;
-  }
-
-  // WebSocket bağlantısı aç
-  function connectWS() {
-    ws = new WebSocket(WS_SERVER_URL);
-
-    ws.onopen = () => {
-      addMessage("Sistem", "Sunucuya bağlanıldı.", false);
-      sendBtn.disabled = false;
-    };
-
-    ws.onmessage = event => {
-      try {
-        const data = JSON.parse(event.data);
-        if(data.user && data.text) {
-          addMessage(data.user, data.text, data.user === username);
-        }
-      } catch(e) {
-        console.error("Mesaj işlenemedi", e);
+    document.getElementById("connect").onclick = () => {
+      myName = document.getElementById("username").value.trim();
+      if (!myName) {
+        alert("Lütfen adınızı yazın");
+        return;
       }
+
+      // Render'daki server.js adresinle değiştir
+      const serverUrl = "wss://mesaj-server.onrender.com";
+      ws = new WebSocket(serverUrl);
+
+      ws.onopen = () => {
+        document.getElementById("form").style.display = "flex";
+        addMessage("Sohbete bağlandınız.", "system");
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        const isMine = data.name === myName;
+        addMessage(`${data.name}: ${data.text}`, isMine ? "mine" : "");
+      };
+
+      ws.onclose = () => addMessage("Bağlantı kapandı.", "system");
     };
 
-    ws.onclose = () => {
-      addMessage("Sistem", "Sunucu bağlantısı kapandı. Sayfayı yenileyin.", false);
-      sendBtn.disabled = true;
-    };
+    document.getElementById("send").onclick = sendMessage;
+    document.getElementById("input").addEventListener("keypress", e => {
+      if (e.key === "Enter") sendMessage();
+    });
 
-    ws.onerror = () => {
-      addMessage("Sistem", "Bağlantı hatası oluştu.", false);
-      sendBtn.disabled = true;
-    };
-  }
-
-  // Mesaj gönder
-  function sendMessage() {
-    const text = messageInput.value.trim();
-    if(text === "" || ws.readyState !== WebSocket.OPEN) return;
-
-    const msgObj = { user: username, text };
-    ws.send(JSON.stringify(msgObj));
-    messageInput.value = "";
-    sendBtn.disabled = true;
-  }
-
-  usernameInput.addEventListener("input", () => {
-    setUsernameBtn.disabled = usernameInput.value.trim().length < 1;
-  });
-
-  messageInput.addEventListener("input", () => {
-    sendBtn.disabled = messageInput.value.trim().length < 1;
-  });
-
-  setUsernameBtn.addEventListener("click", () => {
-    username = usernameInput.value.trim();
-    if(username.length < 1) return;
-
-    usernameSetter.style.display = "none";
-    chatEl.style.display = "flex";
-    inputArea.style.display = "flex";
-    messageInput.focus();
-
-    connectWS();
-  });
-
-  sendBtn.addEventListener("click", sendMessage);
-
-  messageInput.addEventListener("keydown", e => {
-    if(e.key === "Enter" && !sendBtn.disabled) {
-      e.preventDefault();
-      sendMessage();
+    function sendMessage() {
+      const input = document.getElementById("input");
+      const text = input.value.trim();
+      if (!text) return;
+      const messageObj = { name: myName, text };
+      ws.send(JSON.stringify(messageObj));
+      input.value = "";
     }
-  });
 
-})();
-</script>
-
+    function addMessage(text, cls = "") {
+      const msgDiv = document.createElement("div");
+      msgDiv.textContent = text;
+      msgDiv.className = `msg ${cls}`;
+      document.getElementById("messages").appendChild(msgDiv);
+      document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
+    }
+  </script>
 </body>
 </html>
