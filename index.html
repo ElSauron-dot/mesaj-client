@@ -1,90 +1,157 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8" />
-  <title>Mesajlaşma Uygulaması</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; background: #f7f7f7; }
-    h1 { text-align: center; }
-    #messages { background: white; border: 1px solid #ccc; height: 400px; overflow-y: scroll; padding: 10px; }
-    .msg { padding: 5px; margin: 5px 0; border-bottom: 1px solid #eee; }
-    .mine { background: #dcf8c6; }
-    .system { color: gray; font-style: italic; }
-    #form { display: flex; margin-top: 10px; }
-    #input { flex: 1; padding: 8px; }
-    #send { padding: 8px; }
-  </style>
+<meta charset="UTF-8" />
+<title>Mesaj + Arama</title>
+<style>
+  body { font-family: Arial; max-width: 700px; margin: auto; background: #f7f7f7; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #333; color: white; }
+  nav button { margin: 0 5px; padding: 5px 10px; }
+  #messages, #callTab { background: white; border: 1px solid #ccc; height: 400px; overflow-y: auto; padding: 10px; }
+  .msg { padding: 5px; border-bottom: 1px solid #eee; }
+  .mine { background: #dcf8c6; }
+  .system { font-style: italic; color: gray; }
+  #form { display: flex; margin-top: 10px; }
+  #input { flex: 1; padding: 8px; }
+  #send { padding: 8px; }
+  .hidden { display: none; }
+</style>
 </head>
 <body>
-  <h1>Mesajlaşma</h1>
+<header>
+  <div>Mesaj + Arama</div>
+  <div><button id="clearBtn">Tüm Mesajları Temizle</button></div>
+</header>
 
-  <div>
-    <label>Kullanıcı adınız: <input id="username" placeholder="Adınız" /></label>
-    <button id="connect">Bağlan</button>
-  </div>
+<div>
+  <label>Kullanıcı adınız: <input id="username" /></label>
+  <button id="connect">Bağlan</button>
+</div>
 
+<nav>
+  <button id="tabMessages">Mesajlar</button>
+  <button id="tabCalls">Aramalar</button>
+</nav>
+
+<div id="messagesTab">
   <div id="messages"></div>
-
-  <div id="form" style="display:none;">
-    <input id="input" autocomplete="off" placeholder="Mesajınızı yazın..." />
+  <div id="form" class="hidden">
+    <input id="input" placeholder="Mesaj yaz..." />
     <button id="send">Gönder</button>
   </div>
+</div>
 
-  <script>
-    let ws;
-    let myName = "";
+<div id="callTab" class="hidden">
+  <div>
+    <label>Aranacak kullanıcı adı: <input id="callUser" /></label>
+    <button id="callBtn">Ara</button>
+  </div>
+  <audio id="remoteAudio" autoplay></audio>
+</div>
 
-    document.getElementById("connect").onclick = () => {
-      myName = document.getElementById("username").value.trim();
-      if (!myName) {
-        alert("Lütfen adınızı yazın");
-        return;
+<script>
+let ws, myName="", pc, localStream;
+
+// Sekme geçişleri
+document.getElementById("tabMessages").onclick = () => {
+  document.getElementById("messagesTab").classList.remove("hidden");
+  document.getElementById("callTab").classList.add("hidden");
+};
+document.getElementById("tabCalls").onclick = () => {
+  document.getElementById("messagesTab").classList.add("hidden");
+  document.getElementById("callTab").classList.remove("hidden");
+};
+
+// Bağlan
+document.getElementById("connect").onclick = () => {
+  myName = document.getElementById("username").value.trim();
+  if (!myName) return alert("Ad gir");
+
+  ws = new WebSocket("wss://mesaj-server.onrender.com");
+
+  ws.onopen = async () => {
+    document.getElementById("form").classList.remove("hidden");
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  };
+
+  ws.onmessage = async (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "history") {
+      document.getElementById("messages").innerHTML = "";
+      data.messages.forEach(m => addMessage(`${m.name}: ${m.text}`, m.name===myName?"mine":""));
+    }
+    else if (data.type === "chat") {
+      addMessage(`${data.name}: ${data.text}`, data.name===myName?"mine":"");
+    }
+    else if (data.type === "clear") {
+      document.getElementById("messages").innerHTML = "";
+    }
+    else if (data.type === "signal") {
+      if (data.target && data.target !== myName) return;
+      if (!pc) startPeer();
+
+      if (data.signalType === "offer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type:"signal", signalType:"answer", answer, target: data.name, name: myName }));
+      } else if (data.signalType === "answer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.signalType === "candidate") {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
       }
-
-      // Render WebSocket adresin
-      const serverUrl = "wss://mesaj-server.onrender.com";
-      ws = new WebSocket(serverUrl);
-
-      ws.onopen = () => {
-        document.getElementById("form").style.display = "flex";
-        addMessage("Sohbete bağlandınız.", "system");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const isMine = data.name === myName;
-          addMessage(`${data.name}: ${data.text}`, isMine ? "mine" : "");
-        } catch (err) {
-          console.error("Gelen mesaj JSON formatında değil:", event.data);
-        }
-      };
-
-      ws.onclose = () => addMessage("Bağlantı kapandı.", "system");
-    };
-
-    document.getElementById("send").onclick = sendMessage;
-    document.getElementById("input").addEventListener("keypress", e => {
-      if (e.key === "Enter") sendMessage();
-    });
-
-    function sendMessage() {
-      const input = document.getElementById("input");
-      const text = input.value.trim();
-      if (!text) return;
-      const messageObj = { name: myName, text };
-      ws.send(JSON.stringify(messageObj));
-      input.value = "";
     }
+  };
+};
 
-    function addMessage(text, cls = "") {
-      const msgDiv = document.createElement("div");
-      msgDiv.textContent = text;
-      msgDiv.className = `msg ${cls}`;
-      const messages = document.getElementById("messages");
-      messages.appendChild(msgDiv);
-      messages.scrollTop = messages.scrollHeight;
+// Mesaj gönder
+document.getElementById("send").onclick = sendMessage;
+document.getElementById("input").addEventListener("keypress", e => { if (e.key==="Enter") sendMessage(); });
+function sendMessage() {
+  const text = document.getElementById("input").value.trim();
+  if (!text) return;
+  ws.send(JSON.stringify({ type:"chat", name: myName, text }));
+  document.getElementById("input").value="";
+}
+
+// Temizle
+document.getElementById("clearBtn").onclick = () => {
+  ws.send(JSON.stringify({ type: "clear" }));
+};
+
+// Arama başlat
+document.getElementById("callBtn").onclick = async () => {
+  const target = document.getElementById("callUser").value.trim();
+  if (!target) return alert("Hedef kullanıcı gir");
+  startPeer();
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ type:"signal", signalType:"offer", offer, target, name: myName }));
+};
+
+// WebRTC başlat
+function startPeer() {
+  pc = new RTCPeerConnection();
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  pc.ontrack = (event) => {
+    document.getElementById("remoteAudio").srcObject = event.streams[0];
+  };
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      ws.send(JSON.stringify({ type:"signal", signalType:"candidate", candidate: event.candidate, target: document.getElementById("callUser").value.trim(), name: myName }));
     }
-  </script>
+  };
+}
+
+function addMessage(text, cls="") {
+  const div = document.createElement("div");
+  div.textContent = text;
+  div.className = `msg ${cls}`;
+  const m = document.getElementById("messages");
+  m.appendChild(div);
+  m.scrollTop = m.scrollHeight;
+}
+</script>
 </body>
 </html>
