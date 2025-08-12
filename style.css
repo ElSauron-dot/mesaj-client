@@ -60,3 +60,12 @@ nav button:hover, header button:hover {
 .input-area button:hover {
     background-color: #5b6eae;
 }
+#voiceChannelList li {
+    padding: 5px;
+    background-color: #36393f;
+    margin: 3px 0;
+    cursor: pointer;
+}
+#voiceChannelList li:hover {
+    background-color: #4f545c;
+}
