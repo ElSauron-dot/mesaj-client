@@ -80,10 +80,19 @@ ws.addEventListener("message", (event) => {
     if (data.type === "voiceChannels") {
         voiceChannelsDiv.innerHTML = "";
         for (let channel in data.channels) {
+            const wrapper = document.createElement("div");
+            wrapper.classList.add("voice-channel");
             const btn = document.createElement("button");
             btn.textContent = `${channel} (${data.channels[channel].length})`;
             btn.onclick = () => joinVoice(channel);
-            voiceChannelsDiv.appendChild(btn);
+
+            const userList = document.createElement("div");
+            userList.classList.add("voice-users");
+            userList.innerHTML = data.channels[channel].map(u => `<span>${u}</span>`).join(", ");
+
+            wrapper.appendChild(btn);
+            wrapper.appendChild(userList);
+            voiceChannelsDiv.appendChild(wrapper);
         }
     }
 });
