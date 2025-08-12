@@ -2,13 +2,13 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>Mesajlaşma ve Sesli Sohbet</title>
+<title>Mesaj ve Arama</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
     <header>
-        <h1>Mesajlaşma Uygulaması</h1>
+        <h1>Mesajlaşma</h1>
         <button id="clearBtn">Tüm Mesajları Temizle</button>
     </header>
     <main>
@@ -26,13 +26,12 @@
         <section id="callsTab" class="tab">
             <h2>Sesli Kanallar</h2>
             <div id="voiceChannels"></div>
-            <div id="currentChannel"></div>
         </section>
     </main>
 </div>
 
 <script>
-const ws = new WebSocket("https://mesaj-server.onrender.com");
+const ws = new WebSocket("wss://mesaj-server.onrender.com");
 let userName = prompt("Kullanıcı adın:");
 ws.addEventListener("open", () => {
     ws.send(JSON.stringify({ type: "join", name: userName }));
@@ -44,7 +43,7 @@ const sendBtn = document.getElementById("sendBtn");
 const clearBtn = document.getElementById("clearBtn");
 const voiceChannelsDiv = document.getElementById("voiceChannels");
 
-function addMessage(name, text, time) {
+function addMessage(name, text) {
     const div = document.createElement("div");
     div.classList.add("message");
     div.innerHTML = `<strong>${name}</strong>: ${text}`;
@@ -61,9 +60,7 @@ sendBtn.addEventListener("click", () => {
 });
 
 input.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") {
-        sendBtn.click();
-    }
+    if (e.key === "Enter") sendBtn.click();
 });
 
 clearBtn.addEventListener("click", () => {
@@ -74,10 +71,10 @@ ws.addEventListener("message", (event) => {
     const data = JSON.parse(event.data);
 
     if (data.type === "history") {
-        data.messages.forEach(m => addMessage(m.name, m.text, m.time));
+        data.messages.forEach(m => addMessage(m.name, m.text));
     }
     if (data.type === "message") {
-        addMessage(data.name, data.text, data.time);
+        addMessage(data.name, data.text);
     }
     if (data.type === "voiceChannels") {
         voiceChannelsDiv.innerHTML = "";
@@ -87,7 +84,6 @@ ws.addEventListener("message", (event) => {
             btn.onclick = () => joinVoice(channel);
             voiceChannelsDiv.appendChild(btn);
 
-            // Kanaldaki kullanıcıları listele
             const ul = document.createElement("ul");
             data.channels[channel].forEach(u => {
                 const li = document.createElement("li");
@@ -97,9 +93,20 @@ ws.addEventListener("message", (event) => {
             voiceChannelsDiv.appendChild(ul);
         }
     }
+
+    // WebRTC sinyalleşme
+    if (data.type === "offer") {
+        handleOffer(data);
+    }
+    if (data.type === "answer") {
+        handleAnswer(data);
+    }
+    if (data.type === "candidate") {
+        handleCandidate(data);
+    }
 });
 
-// Sesli arama WebRTC
+// WebRTC ayarları (Opus codec)
 let localStream;
 let pc;
 async function joinVoice(channel) {
@@ -119,7 +126,39 @@ async function joinVoice(channel) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    ws.send(JSON.stringify({ type: "offer", sdp: offer, target: null }));
+    // SDP içinde Opus codec tercih et
+    let sdp = offer.sdp.replace(/m=audio .*\r\n/g, match => {
+        return match + "a=rtpmap:111 opus/48000/2\r\n";
+    });
+    offer.sdp = sdp;
+
+    ws.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
+}
+
+async function handleOffer(data) {
+    pc = new RTCPeerConnection();
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+    pc.ontrack = (event) => {
+        const audio = document.createElement("audio");
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+    };
+
+    await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ type: "answer", sdp: answer.sdp }));
+}
+
+async function handleAnswer(data) {
+    await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
+}
+
+function handleCandidate(data) {
+    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
 }
 </script>
 </body>
