@@ -2,167 +2,125 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesaj & Sesli Sohbet</title>
+<title>Mesajlaşma ve Sesli Sohbet</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app">
+<div id="app">
     <header>
-        <h1>Mesajlar</h1>
-        <nav>
-            <button id="tabMessages">Mesajlar</button>
-            <button id="tabCalls">Aramalar</button>
-        </nav>
-        <button id="clearBtn">🗑 Temizle</button>
+        <h1>Mesajlaşma Uygulaması</h1>
+        <button id="clearBtn">Tüm Mesajları Temizle</button>
     </header>
-
-    <main id="messagesView">
-        <div id="messages" class="messages"></div>
-        <div class="input-area">
-            <input type="text" id="nameInput" placeholder="Adınız">
-            <input type="text" id="messageInput" placeholder="Mesaj yaz...">
-            <button id="sendBtn">Gönder</button>
-        </div>
-    </main>
-
-    <main id="callsView" style="display:none;">
-        <h2>Sesli Kanallar</h2>
-        <ul id="voiceChannelList"></ul>
-        <input type="text" id="newChannelName" placeholder="Yeni kanal adı">
-        <button id="addChannelBtn">Ekle</button>
+    <main>
+        <aside>
+            <button class="tab-btn active" data-tab="messages">Mesajlar</button>
+            <button class="tab-btn" data-tab="calls">Aramalar</button>
+        </aside>
+        <section id="messagesTab" class="tab active">
+            <div id="messages"></div>
+            <div id="inputArea">
+                <input type="text" id="messageInput" placeholder="Mesaj yaz..." autocomplete="off">
+                <button id="sendBtn">Gönder</button>
+            </div>
+        </section>
+        <section id="callsTab" class="tab">
+            <h2>Sesli Kanallar</h2>
+            <div id="voiceChannels"></div>
+            <div id="currentChannel"></div>
+        </section>
     </main>
 </div>
 
 <script>
-const serverUrl = "wss://mesaj-server.onrender.com"; // Render URL
-const ws = new WebSocket(serverUrl);
+const ws = new WebSocket("https://mesaj-server.onrender.com");
+let userName = prompt("Kullanıcı adın:");
+ws.addEventListener("open", () => {
+    ws.send(JSON.stringify({ type: "join", name: userName }));
+});
 
-// WebRTC değişkenleri
-let localStream;
-let peers = {};
-let username = "";
+const messagesDiv = document.getElementById("messages");
+const input = document.getElementById("messageInput");
+const sendBtn = document.getElementById("sendBtn");
+const clearBtn = document.getElementById("clearBtn");
+const voiceChannelsDiv = document.getElementById("voiceChannels");
 
-document.getElementById("tabMessages").onclick = () => {
-    document.getElementById("messagesView").style.display = "block";
-    document.getElementById("callsView").style.display = "none";
-};
-document.getElementById("tabCalls").onclick = () => {
-    document.getElementById("messagesView").style.display = "none";
-    document.getElementById("callsView").style.display = "block";
-};
-
-document.getElementById("sendBtn").onclick = () => {
-    username = document.getElementById("nameInput").value.trim();
-    const text = document.getElementById("messageInput").value.trim();
-    if (!username || !text) return;
-    ws.send(JSON.stringify({ type: 'message', name: username, text }));
-    document.getElementById("messageInput").value = "";
-};
-
-document.getElementById("clearBtn").onclick = () => {
-    document.getElementById("messages").innerHTML = "";
-};
-
-document.getElementById("addChannelBtn").onclick = () => {
-    const channel = document.getElementById("newChannelName").value.trim();
-    if (!channel) return;
-    ws.send(JSON.stringify({ type: 'addVoiceChannel', channel }));
-    document.getElementById("newChannelName").value = "";
-};
-
-// Ses kanalına bağlanma
-function joinVoiceChannel(channelName) {
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-        localStream = stream;
-        ws.send(JSON.stringify({ type: "joinVoice", channel: channelName, name: username }));
-
-        // Yeni kullanıcıya offer gönder
-        ws.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-
-            if (data.type === 'voiceChannels') {
-                updateChannelList(data.channels);
-            }
-
-            if (data.type === 'message') {
-                addMessage(data.name, data.text);
-            }
-
-            if (data.type === 'history') {
-                document.getElementById("messages").innerHTML = "";
-                data.messages.forEach(m => addMessage(m.name, m.text));
-            }
-
-            if (data.type === "offer") {
-                const pc = createPeer(data.from);
-                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                ws.send(JSON.stringify({ type: "answer", answer, to: data.from }));
-            }
-
-            if (data.type === "answer" && peers[data.from]) {
-                await peers[data.from].setRemoteDescription(new RTCSessionDescription(data.answer));
-            }
-
-            if (data.type === "candidate" && peers[data.from]) {
-                await peers[data.from].addIceCandidate(new RTCIceCandidate(data.candidate));
-            }
-        };
-    });
+function addMessage(name, text, time) {
+    const div = document.createElement("div");
+    div.classList.add("message");
+    div.innerHTML = `<strong>${name}</strong>: ${text}`;
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
-function createPeer(id) {
-    const pc = new RTCPeerConnection();
-    peers[id] = pc;
+sendBtn.addEventListener("click", () => {
+    const text = input.value.trim();
+    if (text) {
+        ws.send(JSON.stringify({ type: "message", name: userName, text }));
+        input.value = "";
+    }
+});
+
+input.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+        sendBtn.click();
+    }
+});
+
+clearBtn.addEventListener("click", () => {
+    messagesDiv.innerHTML = "";
+});
+
+ws.addEventListener("message", (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "history") {
+        data.messages.forEach(m => addMessage(m.name, m.text, m.time));
+    }
+    if (data.type === "message") {
+        addMessage(data.name, data.text, data.time);
+    }
+    if (data.type === "voiceChannels") {
+        voiceChannelsDiv.innerHTML = "";
+        for (let channel in data.channels) {
+            const btn = document.createElement("button");
+            btn.textContent = `${channel} (${data.channels[channel].length})`;
+            btn.onclick = () => joinVoice(channel);
+            voiceChannelsDiv.appendChild(btn);
+
+            // Kanaldaki kullanıcıları listele
+            const ul = document.createElement("ul");
+            data.channels[channel].forEach(u => {
+                const li = document.createElement("li");
+                li.textContent = u;
+                ul.appendChild(li);
+            });
+            voiceChannelsDiv.appendChild(ul);
+        }
+    }
+});
+
+// Sesli arama WebRTC
+let localStream;
+let pc;
+async function joinVoice(channel) {
+    ws.send(JSON.stringify({ type: "joinVoice", channel }));
+
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    pc = new RTCPeerConnection();
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    pc.ontrack = event => {
+
+    pc.ontrack = (event) => {
         const audio = document.createElement("audio");
         audio.srcObject = event.streams[0];
         audio.autoplay = true;
         document.body.appendChild(audio);
     };
-    pc.onicecandidate = event => {
-        if (event.candidate) {
-            ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate, to: id }));
-        }
-    };
-    return pc;
-}
 
-function addMessage(name, text) {
-    const div = document.createElement("div");
-    div.className = "message";
-    div.innerHTML = `<strong>${name}:</strong> ${text}`;
-    document.getElementById("messages").appendChild(div);
-    div.scrollIntoView();
-}
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-function updateChannelList(channels) {
-    const list = document.getElementById("voiceChannelList");
-    list.innerHTML = "";
-    channels.forEach(c => {
-        const li = document.createElement("li");
-        li.textContent = c;
-        li.onclick = () => joinVoiceChannel(c);
-        list.appendChild(li);
-    });
+    ws.send(JSON.stringify({ type: "offer", sdp: offer, target: null }));
 }
-
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'history') {
-        document.getElementById("messages").innerHTML = "";
-        data.messages.forEach(m => addMessage(m.name, m.text));
-    }
-    if (data.type === 'message') {
-        addMessage(data.name, data.text);
-    }
-    if (data.type === 'voiceChannels') {
-        updateChannelList(data.channels);
-    }
-};
 </script>
 </body>
 </html>
