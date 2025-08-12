@@ -3,18 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesajlaşma Uygulaması</title>
+<title>Mesaj & Sesli Sohbet</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
     <header>
-        <h1 id="roomTitle">Mesajlar</h1>
+        <h1>Mesajlar</h1>
         <nav>
             <button id="tabMessages">Mesajlar</button>
             <button id="tabCalls">Aramalar</button>
         </nav>
-        <button id="clearBtn">🗑 Tüm Mesajları Temizle</button>
+        <button id="clearBtn">🗑 Temizle</button>
     </header>
 
     <main id="messagesView">
@@ -30,15 +30,19 @@
         <h2>Sesli Kanallar</h2>
         <ul id="voiceChannelList"></ul>
         <input type="text" id="newChannelName" placeholder="Yeni kanal adı">
-        <button id="addChannelBtn">Sesli Sohbet Ekle</button>
+        <button id="addChannelBtn">Ekle</button>
     </main>
 </div>
 
 <script>
-const serverUrl = "wss://mesaj-server.onrender.com"; // kendi Render URL’in
+const serverUrl = "wss://mesaj-server.onrender.com"; // Render URL
 const ws = new WebSocket(serverUrl);
 
-// Sekmeler arası geçiş
+// WebRTC değişkenleri
+let localStream;
+let peers = {};
+let username = "";
+
 document.getElementById("tabMessages").onclick = () => {
     document.getElementById("messagesView").style.display = "block";
     document.getElementById("callsView").style.display = "none";
@@ -48,21 +52,18 @@ document.getElementById("tabCalls").onclick = () => {
     document.getElementById("callsView").style.display = "block";
 };
 
-// Mesaj gönderme
 document.getElementById("sendBtn").onclick = () => {
-    const name = document.getElementById("nameInput").value.trim();
+    username = document.getElementById("nameInput").value.trim();
     const text = document.getElementById("messageInput").value.trim();
-    if (!name || !text) return;
-    ws.send(JSON.stringify({ type: 'message', name, text }));
+    if (!username || !text) return;
+    ws.send(JSON.stringify({ type: 'message', name: username, text }));
     document.getElementById("messageInput").value = "";
 };
 
-// Mesajları sadece kendi ekranında temizleme
 document.getElementById("clearBtn").onclick = () => {
     document.getElementById("messages").innerHTML = "";
 };
 
-// Sesli kanal ekleme
 document.getElementById("addChannelBtn").onclick = () => {
     const channel = document.getElementById("newChannelName").value.trim();
     if (!channel) return;
@@ -70,27 +71,65 @@ document.getElementById("addChannelBtn").onclick = () => {
     document.getElementById("newChannelName").value = "";
 };
 
-// Sunucudan gelen veriler
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+// Ses kanalına bağlanma
+function joinVoiceChannel(channelName) {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        localStream = stream;
+        ws.send(JSON.stringify({ type: "joinVoice", channel: channelName, name: username }));
 
-    if (data.type === 'history') {
-        document.getElementById("messages").innerHTML = "";
-        data.messages.forEach(m => addMessage(m.name, m.text));
-    }
-    if (data.type === 'message') {
-        addMessage(data.name, data.text);
-    }
-    if (data.type === 'voiceChannels') {
-        const list = document.getElementById("voiceChannelList");
-        list.innerHTML = "";
-        data.channels.forEach(c => {
-            const li = document.createElement("li");
-            li.textContent = c;
-            list.appendChild(li);
-        });
-    }
-};
+        // Yeni kullanıcıya offer gönder
+        ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'voiceChannels') {
+                updateChannelList(data.channels);
+            }
+
+            if (data.type === 'message') {
+                addMessage(data.name, data.text);
+            }
+
+            if (data.type === 'history') {
+                document.getElementById("messages").innerHTML = "";
+                data.messages.forEach(m => addMessage(m.name, m.text));
+            }
+
+            if (data.type === "offer") {
+                const pc = createPeer(data.from);
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                ws.send(JSON.stringify({ type: "answer", answer, to: data.from }));
+            }
+
+            if (data.type === "answer" && peers[data.from]) {
+                await peers[data.from].setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+
+            if (data.type === "candidate" && peers[data.from]) {
+                await peers[data.from].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        };
+    });
+}
+
+function createPeer(id) {
+    const pc = new RTCPeerConnection();
+    peers[id] = pc;
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    pc.ontrack = event => {
+        const audio = document.createElement("audio");
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+    };
+    pc.onicecandidate = event => {
+        if (event.candidate) {
+            ws.send(JSON.stringify({ type: "candidate", candidate: event.candidate, to: id }));
+        }
+    };
+    return pc;
+}
 
 function addMessage(name, text) {
     const div = document.createElement("div");
@@ -99,6 +138,31 @@ function addMessage(name, text) {
     document.getElementById("messages").appendChild(div);
     div.scrollIntoView();
 }
+
+function updateChannelList(channels) {
+    const list = document.getElementById("voiceChannelList");
+    list.innerHTML = "";
+    channels.forEach(c => {
+        const li = document.createElement("li");
+        li.textContent = c;
+        li.onclick = () => joinVoiceChannel(c);
+        list.appendChild(li);
+    });
+}
+
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'history') {
+        document.getElementById("messages").innerHTML = "";
+        data.messages.forEach(m => addMessage(m.name, m.text));
+    }
+    if (data.type === 'message') {
+        addMessage(data.name, data.text);
+    }
+    if (data.type === 'voiceChannels') {
+        updateChannelList(data.channels);
+    }
+};
 </script>
 </body>
 </html>
