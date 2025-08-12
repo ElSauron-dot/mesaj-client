@@ -1,90 +1,104 @@
 <!DOCTYPE html>
-<html>
+<html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <title>Mesajlaşma Uygulaması</title>
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesajlaşma Uygulaması</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="sidebar">
-        <h2>Kanallar</h2>
-        <button onclick="showTab('messages')">💬 Mesajlar</button>
-        <button onclick="showTab('calls')">📞 Aramalar</button>
-    </div>
+<div class="app">
+    <header>
+        <h1 id="roomTitle">Mesajlar</h1>
+        <nav>
+            <button id="tabMessages">Mesajlar</button>
+            <button id="tabCalls">Aramalar</button>
+        </nav>
+        <button id="clearBtn">🗑 Tüm Mesajları Temizle</button>
+    </header>
 
-    <div class="main">
-        <div class="header">
-            <span id="roomTitle">Mesajlar</span>
-            <div>
-                <button onclick="clearMessages()">🗑 Temizle</button>
-            </div>
+    <main id="messagesView">
+        <div id="messages" class="messages"></div>
+        <div class="input-area">
+            <input type="text" id="nameInput" placeholder="Adınız">
+            <input type="text" id="messageInput" placeholder="Mesaj yaz...">
+            <button id="sendBtn">Gönder</button>
         </div>
+    </main>
 
-        <div id="messagesTab" class="tab">
-            <div class="messages" id="messages"></div>
-            <div class="input-area">
-                <input id="msgInput" placeholder="Mesaj yaz..." onkeydown="if(event.key==='Enter') sendMessage()">
-                <button onclick="sendMessage()">Gönder</button>
-            </div>
-        </div>
+    <main id="callsView" style="display:none;">
+        <h2>Sesli Kanallar</h2>
+        <ul id="voiceChannelList"></ul>
+        <input type="text" id="newChannelName" placeholder="Yeni kanal adı">
+        <button id="addChannelBtn">Sesli Sohbet Ekle</button>
+    </main>
+</div>
 
-        <div id="callsTab" class="tab" style="display:none;">
-            <div class="messages">
-                <input id="callTarget" placeholder="Kullanıcı adı gir">
-                <button onclick="startCall()">Ara</button>
-            </div>
-        </div>
-    </div>
+<script>
+const serverUrl = "wss://mesaj-server.onrender.com"; // kendi Render URL’in
+const ws = new WebSocket(serverUrl);
 
-    <script>
-        const ws = new WebSocket("wss://mesaj-server.onrender.com");
-        let username = prompt("Kullanıcı adınız:");
-        ws.onopen = () => {
-            ws.send(JSON.stringify({ type: 'join', name: username }));
-        };
+// Sekmeler arası geçiş
+document.getElementById("tabMessages").onclick = () => {
+    document.getElementById("messagesView").style.display = "block";
+    document.getElementById("callsView").style.display = "none";
+};
+document.getElementById("tabCalls").onclick = () => {
+    document.getElementById("messagesView").style.display = "none";
+    document.getElementById("callsView").style.display = "block";
+};
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'history') {
-                data.messages.forEach(m => addMessage(m.name, m.text));
-            }
-            if (data.type === 'message') {
-                addMessage(data.name, data.text);
-            }
-            if (data.type === 'cleared') {
-                document.getElementById("messages").innerHTML = "";
-            }
-        };
+// Mesaj gönderme
+document.getElementById("sendBtn").onclick = () => {
+    const name = document.getElementById("nameInput").value.trim();
+    const text = document.getElementById("messageInput").value.trim();
+    if (!name || !text) return;
+    ws.send(JSON.stringify({ type: 'message', name, text }));
+    document.getElementById("messageInput").value = "";
+};
 
-        function addMessage(name, text) {
-            const msgBox = document.getElementById("messages");
-            const div = document.createElement("div");
-            div.className = "message";
-            div.innerHTML = `<strong>${name}:</strong> ${text}`;
-            msgBox.appendChild(div);
-            msgBox.scrollTop = msgBox.scrollHeight;
-        }
+// Mesajları sadece kendi ekranında temizleme
+document.getElementById("clearBtn").onclick = () => {
+    document.getElementById("messages").innerHTML = "";
+};
 
-        function sendMessage() {
-            const text = document.getElementById("msgInput").value;
-            if (!text) return;
-            ws.send(JSON.stringify({ type: 'message', name: username, text }));
-            document.getElementById("msgInput").value = "";
-        }
+// Sesli kanal ekleme
+document.getElementById("addChannelBtn").onclick = () => {
+    const channel = document.getElementById("newChannelName").value.trim();
+    if (!channel) return;
+    ws.send(JSON.stringify({ type: 'addVoiceChannel', channel }));
+    document.getElementById("newChannelName").value = "";
+};
 
-        function clearMessages() {
-            ws.send(JSON.stringify({ type: 'clear' }));
-        }
+// Sunucudan gelen veriler
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
 
-        function showTab(tab) {
-            document.getElementById("messagesTab").style.display = tab === 'messages' ? 'flex' : 'none';
-            document.getElementById("callsTab").style.display = tab === 'calls' ? 'flex' : 'none';
-            document.getElementById("roomTitle").textContent = tab === 'messages' ? 'Mesajlar' : 'Aramalar';
-        }
+    if (data.type === 'history') {
+        document.getElementById("messages").innerHTML = "";
+        data.messages.forEach(m => addMessage(m.name, m.text));
+    }
+    if (data.type === 'message') {
+        addMessage(data.name, data.text);
+    }
+    if (data.type === 'voiceChannels') {
+        const list = document.getElementById("voiceChannelList");
+        list.innerHTML = "";
+        data.channels.forEach(c => {
+            const li = document.createElement("li");
+            li.textContent = c;
+            list.appendChild(li);
+        });
+    }
+};
 
-        function startCall() {
-            alert("Sesli arama özelliği eklenecek.");
-        }
-    </script>
+function addMessage(name, text) {
+    const div = document.createElement("div");
+    div.className = "message";
+    div.innerHTML = `<strong>${name}:</strong> ${text}`;
+    document.getElementById("messages").appendChild(div);
+    div.scrollIntoView();
+}
+</script>
 </body>
 </html>
