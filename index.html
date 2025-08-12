@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>Mesaj ve Arama</title>
+<title>Steam Tarzı Mesajlaşma</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -31,8 +31,9 @@
 </div>
 
 <script>
-const ws = new WebSocket("wss://mesaj-server.onrender.com");
+const ws = new WebSocket("https://mesaj-server.onrender.com");
 let userName = prompt("Kullanıcı adın:");
+
 ws.addEventListener("open", () => {
     ws.send(JSON.stringify({ type: "join", name: userName }));
 });
@@ -83,34 +84,15 @@ ws.addEventListener("message", (event) => {
             btn.textContent = `${channel} (${data.channels[channel].length})`;
             btn.onclick = () => joinVoice(channel);
             voiceChannelsDiv.appendChild(btn);
-
-            const ul = document.createElement("ul");
-            data.channels[channel].forEach(u => {
-                const li = document.createElement("li");
-                li.textContent = u;
-                ul.appendChild(li);
-            });
-            voiceChannelsDiv.appendChild(ul);
         }
-    }
-
-    // WebRTC sinyalleşme
-    if (data.type === "offer") {
-        handleOffer(data);
-    }
-    if (data.type === "answer") {
-        handleAnswer(data);
-    }
-    if (data.type === "candidate") {
-        handleCandidate(data);
     }
 });
 
-// WebRTC ayarları (Opus codec)
+// WebRTC sesli arama
 let localStream;
 let pc;
 async function joinVoice(channel) {
-    ws.send(JSON.stringify({ type: "joinVoice", channel }));
+    ws.send(JSON.stringify({ type: "joinVoice", channel, name: userName }));
 
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     pc = new RTCPeerConnection();
@@ -126,39 +108,7 @@ async function joinVoice(channel) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    // SDP içinde Opus codec tercih et
-    let sdp = offer.sdp.replace(/m=audio .*\r\n/g, match => {
-        return match + "a=rtpmap:111 opus/48000/2\r\n";
-    });
-    offer.sdp = sdp;
-
-    ws.send(JSON.stringify({ type: "offer", sdp: offer.sdp }));
-}
-
-async function handleOffer(data) {
-    pc = new RTCPeerConnection();
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-    pc.ontrack = (event) => {
-        const audio = document.createElement("audio");
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-    };
-
-    await pc.setRemoteDescription({ type: "offer", sdp: data.sdp });
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    ws.send(JSON.stringify({ type: "answer", sdp: answer.sdp }));
-}
-
-async function handleAnswer(data) {
-    await pc.setRemoteDescription({ type: "answer", sdp: data.sdp });
-}
-
-function handleCandidate(data) {
-    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+    ws.send(JSON.stringify({ type: "offer", sdp: offer }));
 }
 </script>
 </body>
