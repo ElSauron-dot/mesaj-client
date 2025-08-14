@@ -48,6 +48,7 @@ const videos = document.getElementById('videos');
 const userListEl = document.getElementById('userList');
 const messagesEl = document.getElementById('messages');
 const messageInput = document.getElementById('messageInput');
+
 let localStream, peers = {}, isMuted = false, isVideoOff = false;
 let roomID, users = [];
 
@@ -71,9 +72,10 @@ function addMessage(msg) {
 
 // Oda oluştur
 createRoomBtn.onclick = () => {
-  roomID = 'ROOM-' + Math.random().toString(36).substring(2,8).toUpperCase();
-  alert('Odanız oluşturuldu! Oda IP/ID: ' + roomID);
-  document.getElementById('roomInput').value = roomID;
+  socket.emit('create-room', ({ roomID }) => {
+    alert('Odanız oluşturuldu! Oda IP/ID: ' + roomID);
+    document.getElementById('roomInput').value = roomID;
+  });
 };
 
 // Odaya katıl
@@ -92,11 +94,16 @@ joinBtn.onclick = async () => {
 
   socket.emit('join-room', roomID, (response) => {
     if (!response.success) return alert("Oda bulunamadı!");
+    addMessage('✅ Partiye katıldınız!');
   });
+
+  socket.on('joined-room', id => addMessage('✅ Partiye katıldınız!'));
 
   socket.on('user-connected', userID => {
     users.push(userID);
     updateUserList();
+    addMessage('🔔 ' + userID + ' partiye katıldı');
+
     const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
     peer.on('signal', signal => socket.emit('signal', { to: userID, signal }));
     peer.on('stream', stream => addVideoStream(stream, userID));
@@ -120,11 +127,10 @@ joinBtn.onclick = async () => {
     const video = document.getElementById('video-' + id); if (video) video.remove();
     users = users.filter(u => u !== id);
     updateUserList();
+    addMessage('🔔 ' + id + ' partiden ayrıldı');
   });
 
-  socket.on('message', ({user, text}) => {
-    addMessage(user + ': ' + text);
-  });
+  socket.on('message', ({user, text}) => addMessage(user + ': ' + text));
 };
 
 function addVideoStream(stream, id) {
@@ -173,7 +179,7 @@ screenBtn.onclick = async () => {
   }
 };
 
-// Sohbet mesaj gönder
+// Mesaj gönder
 sendBtn.onclick = () => {
   if (!messageInput.value) return;
   socket.emit('message', { room: roomID, text: messageInput.value });
@@ -185,5 +191,6 @@ messageInput.addEventListener('keypress', e => {
   if (e.key === 'Enter') sendBtn.click();
 });
 </script>
+
 </body>
 </html>
