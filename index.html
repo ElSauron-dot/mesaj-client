@@ -2,123 +2,81 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>Steam Tarzı Mesajlaşma</title>
-<link rel="stylesheet" href="style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Meet</title>
+<style>
+  body { font-family: Arial; display: flex; flex-direction: column; align-items: center; background: #f2f2f2; }
+  video { width: 300px; margin: 5px; border-radius: 5px; background: black; }
+  #videos { display: flex; flex-wrap: wrap; justify-content: center; }
+</style>
 </head>
 <body>
-<div id="app">
-    <header>
-        <h1>Mesajlaşma</h1>
-        <button id="clearBtn">Tüm Mesajları Temizle</button>
-    </header>
-    <main>
-        <aside>
-            <button class="tab-btn active" data-tab="messages">Mesajlar</button>
-            <button class="tab-btn" data-tab="calls">Aramalar</button>
-        </aside>
-        <section id="messagesTab" class="tab active">
-            <div id="messages"></div>
-            <div id="inputArea">
-                <input type="text" id="messageInput" placeholder="Mesaj yaz..." autocomplete="off">
-                <button id="sendBtn">Gönder</button>
-            </div>
-        </section>
-        <section id="callsTab" class="tab">
-            <h2>Sesli Kanallar</h2>
-            <div id="voiceChannels"></div>
-        </section>
-    </main>
-</div>
 
+<h2>Mini Meet - Sesli & Görüntülü Arama</h2>
+<input type="text" id="roomInput" placeholder="Oda ID'si girin" />
+<button id="joinBtn">Odaya Katıl</button>
+
+<div id="videos"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.2/dist/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 <script>
-const ws = new WebSocket("https://mesaj-server.onrender.com");
-let userName = prompt("Kullanıcı adın:");
-
-ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({ type: "join", name: userName }));
-});
-
-const messagesDiv = document.getElementById("messages");
-const input = document.getElementById("messageInput");
-const sendBtn = document.getElementById("sendBtn");
-const clearBtn = document.getElementById("clearBtn");
-const voiceChannelsDiv = document.getElementById("voiceChannels");
-
-function addMessage(name, text) {
-    const div = document.createElement("div");
-    div.classList.add("message");
-    div.innerHTML = `<strong>${name}</strong>: ${text}`;
-    messagesDiv.appendChild(div);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-}
-
-sendBtn.addEventListener("click", () => {
-    const text = input.value.trim();
-    if (text) {
-        ws.send(JSON.stringify({ type: "message", name: userName, text }));
-        input.value = "";
-    }
-});
-
-input.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") sendBtn.click();
-});
-
-clearBtn.addEventListener("click", () => {
-    messagesDiv.innerHTML = "";
-});
-
-ws.addEventListener("message", (event) => {
-    const data = JSON.parse(event.data);
-
-    if (data.type === "history") {
-        data.messages.forEach(m => addMessage(m.name, m.text));
-    }
-    if (data.type === "message") {
-        addMessage(data.name, data.text);
-    }
-    if (data.type === "voiceChannels") {
-        voiceChannelsDiv.innerHTML = "";
-        for (let channel in data.channels) {
-            const wrapper = document.createElement("div");
-            wrapper.classList.add("voice-channel");
-            const btn = document.createElement("button");
-            btn.textContent = `${channel} (${data.channels[channel].length})`;
-            btn.onclick = () => joinVoice(channel);
-
-            const userList = document.createElement("div");
-            userList.classList.add("voice-users");
-            userList.innerHTML = data.channels[channel].map(u => `<span>${u}</span>`).join(", ");
-
-            wrapper.appendChild(btn);
-            wrapper.appendChild(userList);
-            voiceChannelsDiv.appendChild(wrapper);
-        }
-    }
-});
-
-// WebRTC sesli arama
+const socket = io();
+const videos = document.getElementById('videos');
 let localStream;
-let pc;
-async function joinVoice(channel) {
-    ws.send(JSON.stringify({ type: "joinVoice", channel, name: userName }));
+let peers = {};
 
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    pc = new RTCPeerConnection();
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+const joinBtn = document.getElementById('joinBtn');
+joinBtn.onclick = async () => {
+    const roomID = document.getElementById('roomInput').value;
+    if (!roomID) return alert("Oda ID'si girin!");
 
-    pc.ontrack = (event) => {
-        const audio = document.createElement("audio");
-        audio.srcObject = event.streams[0];
-        audio.autoplay = true;
-        document.body.appendChild(audio);
-    };
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    const localVideo = document.createElement('video');
+    localVideo.srcObject = localStream;
+    localVideo.muted = true;
+    localVideo.autoplay = true;
+    videos.appendChild(localVideo);
 
-    ws.send(JSON.stringify({ type: "offer", sdp: offer }));
+    socket.emit('join-room', roomID);
+
+    socket.on('user-connected', userID => {
+        const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
+        peer.on('signal', signal => {
+            socket.emit('signal', { to: userID, signal });
+        });
+        peer.on('stream', stream => addVideoStream(stream));
+        peers[userID] = peer;
+    });
+
+    socket.on('signal', async data => {
+        if (!peers[data.from]) {
+            const peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
+            peer.on('signal', signal => socket.emit('signal', { to: data.from, signal }));
+            peer.on('stream', stream => addVideoStream(stream));
+            peers[data.from] = peer;
+            peer.signal(data.signal);
+        } else {
+            peers[data.from].signal(data.signal);
+        }
+    });
+
+    socket.on('user-disconnected', id => {
+        if (peers[id]) {
+            peers[id].destroy();
+            delete peers[id];
+        }
+    });
+};
+
+function addVideoStream(stream) {
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.autoplay = true;
+    videos.appendChild(video);
 }
 </script>
+
 </body>
 </html>
