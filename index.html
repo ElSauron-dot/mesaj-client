@@ -3,80 +3,187 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mini Meet</title>
+<title>MiniGameChat</title>
 <style>
-  body { font-family: Arial; display: flex; flex-direction: column; align-items: center; background: #f2f2f2; }
-  video { width: 300px; margin: 5px; border-radius: 5px; background: black; }
-  #videos { display: flex; flex-wrap: wrap; justify-content: center; }
+body { font-family: Arial; display: flex; flex-direction: column; align-items: center; background: #f2f2f2; margin:0; }
+h2 { margin-top: 10px; }
+#controls { margin: 10px; }
+#videos { display: flex; flex-wrap: wrap; justify-content: center; }
+video { width: 300px; margin: 5px; border-radius: 5px; background: black; }
+button { margin: 2px; padding: 5px 10px; }
+#users { margin: 10px; }
+#chat { margin:10px; width: 90%; max-width: 600px; }
+#messages { height: 150px; overflow-y: auto; background: #fff; border: 1px solid #ccc; padding: 5px; }
+#messageInput { width: calc(100% - 60px); padding: 5px; }
 </style>
 </head>
 <body>
 
-<h2>Mini Meet - Sesli & Görüntülü Arama</h2>
-<input type="text" id="roomInput" placeholder="Oda ID'si girin" />
-<button id="joinBtn">Odaya Katıl</button>
+<h2>MiniGameChat</h2>
+
+<div id="controls">
+  <input type="text" id="roomInput" placeholder="Oda IP / ID" />
+  <button id="createRoomBtn">Oda Oluştur</button>
+  <button id="joinBtn">Odaya Katıl</button>
+  <button id="muteBtn">Mikrofon Kapat</button>
+  <button id="videoBtn">Kamera Kapat</button>
+  <button id="screenBtn">Ekran Paylaş</button>
+</div>
+
+<div id="users"><strong>Kullanıcılar:</strong> <span id="userList"></span></div>
 
 <div id="videos"></div>
+
+<div id="chat">
+  <div id="messages"></div>
+  <input type="text" id="messageInput" placeholder="Mesaj yazın..." />
+  <button id="sendBtn">Gönder</button>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.2/dist/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 <script>
-const socket = io();
+const socket = io('https://mesaj-server.onrender.com');
 const videos = document.getElementById('videos');
-let localStream;
-let peers = {};
+const userListEl = document.getElementById('userList');
+const messagesEl = document.getElementById('messages');
+const messageInput = document.getElementById('messageInput');
+let localStream, peers = {}, isMuted = false, isVideoOff = false;
+let roomID, users = [];
 
 const joinBtn = document.getElementById('joinBtn');
-joinBtn.onclick = async () => {
-    const roomID = document.getElementById('roomInput').value;
-    if (!roomID) return alert("Oda ID'si girin!");
+const createRoomBtn = document.getElementById('createRoomBtn');
+const muteBtn = document.getElementById('muteBtn');
+const videoBtn = document.getElementById('videoBtn');
+const screenBtn = document.getElementById('screenBtn');
+const sendBtn = document.getElementById('sendBtn');
 
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+function updateUserList() {
+  userListEl.textContent = users.join(', ');
+}
 
-    const localVideo = document.createElement('video');
-    localVideo.srcObject = localStream;
-    localVideo.muted = true;
-    localVideo.autoplay = true;
-    videos.appendChild(localVideo);
+function addMessage(msg) {
+  const div = document.createElement('div');
+  div.textContent = msg;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
 
-    socket.emit('join-room', roomID);
-
-    socket.on('user-connected', userID => {
-        const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
-        peer.on('signal', signal => {
-            socket.emit('signal', { to: userID, signal });
-        });
-        peer.on('stream', stream => addVideoStream(stream));
-        peers[userID] = peer;
-    });
-
-    socket.on('signal', async data => {
-        if (!peers[data.from]) {
-            const peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
-            peer.on('signal', signal => socket.emit('signal', { to: data.from, signal }));
-            peer.on('stream', stream => addVideoStream(stream));
-            peers[data.from] = peer;
-            peer.signal(data.signal);
-        } else {
-            peers[data.from].signal(data.signal);
-        }
-    });
-
-    socket.on('user-disconnected', id => {
-        if (peers[id]) {
-            peers[id].destroy();
-            delete peers[id];
-        }
-    });
+// Oda oluştur
+createRoomBtn.onclick = () => {
+  roomID = 'ROOM-' + Math.random().toString(36).substring(2,8).toUpperCase();
+  alert('Odanız oluşturuldu! Oda IP/ID: ' + roomID);
+  document.getElementById('roomInput').value = roomID;
 };
 
-function addVideoStream(stream) {
-    const video = document.createElement('video');
-    video.srcObject = stream;
-    video.autoplay = true;
-    videos.appendChild(video);
-}
-</script>
+// Odaya katıl
+joinBtn.onclick = async () => {
+  roomID = document.getElementById('roomInput').value;
+  if (!roomID) return alert("Oda IP/ID girin!");
 
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+  const localVideo = document.createElement('video');
+  localVideo.srcObject = localStream;
+  localVideo.muted = true;
+  localVideo.autoplay = true;
+  localVideo.id = 'localVideo';
+  videos.appendChild(localVideo);
+
+  socket.emit('join-room', roomID, (response) => {
+    if (!response.success) return alert("Oda bulunamadı!");
+  });
+
+  socket.on('user-connected', userID => {
+    users.push(userID);
+    updateUserList();
+    const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
+    peer.on('signal', signal => socket.emit('signal', { to: userID, signal }));
+    peer.on('stream', stream => addVideoStream(stream, userID));
+    peers[userID] = peer;
+  });
+
+  socket.on('signal', data => {
+    if (!peers[data.from]) {
+      const peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
+      peer.on('signal', signal => socket.emit('signal', { to: data.from, signal }));
+      peer.on('stream', stream => addVideoStream(stream, data.from));
+      peers[data.from] = peer;
+      peer.signal(data.signal);
+    } else {
+      peers[data.from].signal(data.signal);
+    }
+  });
+
+  socket.on('user-disconnected', id => {
+    if (peers[id]) { peers[id].destroy(); delete peers[id]; }
+    const video = document.getElementById('video-' + id); if (video) video.remove();
+    users = users.filter(u => u !== id);
+    updateUserList();
+  });
+
+  socket.on('message', ({user, text}) => {
+    addMessage(user + ': ' + text);
+  });
+};
+
+function addVideoStream(stream, id) {
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.autoplay = true;
+  video.id = 'video-' + id;
+  videos.appendChild(video);
+}
+
+// Mikrofon aç/kapat
+muteBtn.onclick = () => {
+  if (!localStream) return;
+  isMuted = !isMuted;
+  localStream.getAudioTracks()[0].enabled = !isMuted;
+  muteBtn.textContent = isMuted ? "Mikrofon Aç" : "Mikrofon Kapat";
+};
+
+// Kamera aç/kapat
+videoBtn.onclick = () => {
+  if (!localStream) return;
+  isVideoOff = !isVideoOff;
+  localStream.getVideoTracks()[0].enabled = !isVideoOff;
+  videoBtn.textContent = isVideoOff ? "Kamera Aç" : "Kamera Kapat";
+};
+
+// Ekran paylaşımı
+screenBtn.onclick = async () => {
+  if (!localStream) return;
+  try {
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    const screenTrack = screenStream.getVideoTracks()[0];
+    for (let id in peers) {
+      const sender = peers[id]._pc.getSenders().find(s => s.track.kind === 'video');
+      if (sender) sender.replaceTrack(screenTrack);
+    }
+    screenTrack.onended = () => {
+      const videoTrack = localStream.getVideoTracks()[0];
+      for (let id in peers) {
+        const sender = peers[id]._pc.getSenders().find(s => s.track.kind === 'video');
+        if (sender) sender.replaceTrack(videoTrack);
+      }
+    };
+  } catch (err) {
+    console.log("Ekran paylaşımı iptal edildi", err);
+  }
+};
+
+// Sohbet mesaj gönder
+sendBtn.onclick = () => {
+  if (!messageInput.value) return;
+  socket.emit('message', { room: roomID, text: messageInput.value });
+  addMessage('Ben: ' + messageInput.value);
+  messageInput.value = '';
+};
+
+messageInput.addEventListener('keypress', e => {
+  if (e.key === 'Enter') sendBtn.click();
+});
+</script>
 </body>
 </html>
