@@ -17,15 +17,21 @@
     color: white;
     font-family: Arial, sans-serif;
   }
-  button {
-    padding: 20px 50px;
-    font-size: 36px;
-    cursor: pointer;
+  input, button {
+    padding: 15px 30px;
+    font-size: 24px;
+    margin: 5px;
+    border-radius: 10px;
     border: none;
-    border-radius: 12px;
+  }
+  input {
+    width: 250px;
+  }
+  button {
     background-color: #1a1a1a;
     color: white;
     font-family: 'Luckiest Guy', cursive;
+    cursor: pointer;
     transition: 0.3s;
   }
   button:hover {
@@ -44,13 +50,17 @@
 </style>
 </head>
 <body>
+
+<input type="text" id="nick" placeholder="Nickinizi girin" />
 <button id="joinBtn">Aramaya Katıl</button>
-<div id="users">
+
+<div id="users" style="display:none">
     Canlı Kullanıcılar: 0
     <ul id="userList"></ul>
 </div>
 
 <script>
+const nickInput = document.getElementById('nick');
 const joinBtn = document.getElementById('joinBtn');
 const usersDiv = document.getElementById('users');
 const userListUl = document.getElementById('userList');
@@ -65,49 +75,40 @@ socket.onopen = () => console.log("WebSocket bağlandı");
 socket.onmessage = async (message) => {
     const data = JSON.parse(message.data);
 
-    if(data.type === 'id') {
-        myId = data.id;
-    }
+    if(data.type === 'id') myId = data.id;
 
-    if(data.type === 'user-list') {
-        updateUserList(data.users);
-    }
+    if(data.type === 'user-list') updateUserList(data.users);
 
     if(data.type === 'offer') {
         const pc = createPeerConnection(data.from);
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.send(JSON.stringify({
-            type: 'answer',
-            answer: answer,
-            to: data.from
-        }));
+        socket.send(JSON.stringify({ type:'answer', answer, to: data.from }));
     } else if(data.type === 'answer') {
         await peerConnections[data.from].setRemoteDescription(new RTCSessionDescription(data.answer));
     } else if(data.type === 'ice-candidate') {
-        try {
-            await peerConnections[data.from].addIceCandidate(data.candidate);
-        } catch(e) {
-            console.error(e);
-        }
+        try { await peerConnections[data.from].addIceCandidate(data.candidate); } catch(e){ console.error(e); }
     }
 };
 
 function updateUserList(users) {
     usersDiv.firstChild.textContent = 'Canlı Kullanıcılar: ' + users.length;
     userListUl.innerHTML = '';
-    users.forEach(id => {
+    users.forEach(nick => {
         const li = document.createElement('li');
-        li.textContent = id === myId ? id + " (Ben)" : id;
+        li.textContent = nick;
         userListUl.appendChild(li);
     });
 }
 
 joinBtn.onclick = async () => {
+    const nick = nickInput.value.trim() || 'Anon';
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    joinBtn.disabled = true;
-    socket.send(JSON.stringify({ type: 'join' }));
+    nickInput.style.display = 'none';
+    joinBtn.style.display = 'none';
+    usersDiv.style.display = 'block';
+    socket.send(JSON.stringify({ type:'join', nick }));
 };
 
 function createPeerConnection(id) {
@@ -117,7 +118,7 @@ function createPeerConnection(id) {
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
     pc.ontrack = (event) => {
-        let audio = document.createElement('audio');
+        const audio = document.createElement('audio');
         audio.srcObject = event.streams[0];
         audio.autoplay = true;
         document.body.appendChild(audio);
@@ -125,16 +126,13 @@ function createPeerConnection(id) {
 
     pc.onicecandidate = (event) => {
         if(event.candidate) {
-            socket.send(JSON.stringify({
-                type: 'ice-candidate',
-                candidate: event.candidate,
-                to: id
-            }));
+            socket.send(JSON.stringify({ type:'ice-candidate', candidate:event.candidate, to:id }));
         }
     };
 
     return pc;
 }
 </script>
+
 </body>
 </html>
