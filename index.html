@@ -3,194 +3,138 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MiniGameChat</title>
+<title>Mini Voice Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap" rel="stylesheet">
 <style>
-body { font-family: Arial; display: flex; flex-direction: column; align-items: center; background: #f2f2f2; margin:0; }
-h2 { margin-top: 10px; }
-#controls { margin: 10px; }
-#videos { display: flex; flex-wrap: wrap; justify-content: center; }
-video { width: 300px; margin: 5px; border-radius: 5px; background: black; }
-button { margin: 2px; padding: 5px 10px; }
-#users { margin: 10px; }
-#chat { margin:10px; width: 90%; max-width: 600px; }
-#messages { height: 150px; overflow-y: auto; background: #fff; border: 1px solid #ccc; padding: 5px; }
-#messageInput { width: calc(100% - 60px); padding: 5px; }
+  body {
+    margin: 0;
+    background-color: black;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    color: white;
+    font-family: Arial, sans-serif;
+  }
+  button {
+    padding: 20px 50px;
+    font-size: 36px;
+    cursor: pointer;
+    border: none;
+    border-radius: 12px;
+    background-color: #1a1a1a;
+    color: white;
+    font-family: 'Luckiest Guy', cursive;
+    transition: 0.3s;
+  }
+  button:hover {
+    background-color: #333;
+  }
+  #users {
+    margin-top: 20px;
+    font-size: 20px;
+    text-align: center;
+  }
+  #users ul {
+    list-style: none;
+    padding: 0;
+    margin: 5px 0 0 0;
+  }
 </style>
 </head>
 <body>
-
-<h2>MiniGameChat</h2>
-
-<div id="controls">
-  <input type="text" id="roomInput" placeholder="Oda IP / ID" />
-  <button id="createRoomBtn">Oda Oluştur</button>
-  <button id="joinBtn">Odaya Katıl</button>
-  <button id="muteBtn">Mikrofon Kapat</button>
-  <button id="videoBtn">Kamera Kapat</button>
-  <button id="screenBtn">Ekran Paylaş</button>
+<button id="joinBtn">Aramaya Katıl</button>
+<div id="users">
+    Canlı Kullanıcılar: 0
+    <ul id="userList"></ul>
 </div>
 
-<div id="users"><strong>Kullanıcılar:</strong> <span id="userList"></span></div>
-
-<div id="videos"></div>
-
-<div id="chat">
-  <div id="messages"></div>
-  <input type="text" id="messageInput" placeholder="Mesaj yazın..." />
-  <button id="sendBtn">Gönder</button>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.2/dist/socket.io.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 <script>
-const socket = io('https://mesaj-server.onrender.com');
-const videos = document.getElementById('videos');
-const userListEl = document.getElementById('userList');
-const messagesEl = document.getElementById('messages');
-const messageInput = document.getElementById('messageInput');
-
-let localStream, peers = {}, isMuted = false, isVideoOff = false;
-let roomID, users = [];
-
 const joinBtn = document.getElementById('joinBtn');
-const createRoomBtn = document.getElementById('createRoomBtn');
-const muteBtn = document.getElementById('muteBtn');
-const videoBtn = document.getElementById('videoBtn');
-const screenBtn = document.getElementById('screenBtn');
-const sendBtn = document.getElementById('sendBtn');
+const usersDiv = document.getElementById('users');
+const userListUl = document.getElementById('userList');
+let localStream;
+let peerConnections = {};
+let myId = null;
 
-function updateUserList() {
-  userListEl.textContent = users.join(', ');
-}
+const socket = new WebSocket('wss://mesaj-server.onrender.com');
 
-function addMessage(msg) {
-  const div = document.createElement('div');
-  div.textContent = msg;
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
+socket.onopen = () => console.log("WebSocket bağlandı");
 
-// Oda oluştur
-createRoomBtn.onclick = () => {
-  socket.emit('create-room', ({ roomID }) => {
-    alert('Odanız oluşturuldu! Oda IP/ID: ' + roomID);
-    document.getElementById('roomInput').value = roomID;
-  });
+socket.onmessage = async (message) => {
+    const data = JSON.parse(message.data);
+
+    if(data.type === 'id') {
+        myId = data.id;
+    }
+
+    if(data.type === 'user-list') {
+        updateUserList(data.users);
+    }
+
+    if(data.type === 'offer') {
+        const pc = createPeerConnection(data.from);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.send(JSON.stringify({
+            type: 'answer',
+            answer: answer,
+            to: data.from
+        }));
+    } else if(data.type === 'answer') {
+        await peerConnections[data.from].setRemoteDescription(new RTCSessionDescription(data.answer));
+    } else if(data.type === 'ice-candidate') {
+        try {
+            await peerConnections[data.from].addIceCandidate(data.candidate);
+        } catch(e) {
+            console.error(e);
+        }
+    }
 };
 
-// Odaya katıl
+function updateUserList(users) {
+    usersDiv.firstChild.textContent = 'Canlı Kullanıcılar: ' + users.length;
+    userListUl.innerHTML = '';
+    users.forEach(id => {
+        const li = document.createElement('li');
+        li.textContent = id === myId ? id + " (Ben)" : id;
+        userListUl.appendChild(li);
+    });
+}
+
 joinBtn.onclick = async () => {
-  roomID = document.getElementById('roomInput').value;
-  if (!roomID) return alert("Oda IP/ID girin!");
-
-  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-  const localVideo = document.createElement('video');
-  localVideo.srcObject = localStream;
-  localVideo.muted = true;
-  localVideo.autoplay = true;
-  localVideo.id = 'localVideo';
-  videos.appendChild(localVideo);
-
-  socket.emit('join-room', roomID, (response) => {
-    if (!response.success) return alert("Oda bulunamadı!");
-    addMessage('✅ Partiye katıldınız!');
-  });
-
-  socket.on('joined-room', id => addMessage('✅ Partiye katıldınız!'));
-
-  socket.on('user-connected', userID => {
-    users.push(userID);
-    updateUserList();
-    addMessage('🔔 ' + userID + ' partiye katıldı');
-
-    const peer = new SimplePeer({ initiator: true, trickle: false, stream: localStream });
-    peer.on('signal', signal => socket.emit('signal', { to: userID, signal }));
-    peer.on('stream', stream => addVideoStream(stream, userID));
-    peers[userID] = peer;
-  });
-
-  socket.on('signal', data => {
-    if (!peers[data.from]) {
-      const peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
-      peer.on('signal', signal => socket.emit('signal', { to: data.from, signal }));
-      peer.on('stream', stream => addVideoStream(stream, data.from));
-      peers[data.from] = peer;
-      peer.signal(data.signal);
-    } else {
-      peers[data.from].signal(data.signal);
-    }
-  });
-
-  socket.on('user-disconnected', id => {
-    if (peers[id]) { peers[id].destroy(); delete peers[id]; }
-    const video = document.getElementById('video-' + id); if (video) video.remove();
-    users = users.filter(u => u !== id);
-    updateUserList();
-    addMessage('🔔 ' + id + ' partiden ayrıldı');
-  });
-
-  socket.on('message', ({user, text}) => addMessage(user + ': ' + text));
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    joinBtn.disabled = true;
+    socket.send(JSON.stringify({ type: 'join' }));
 };
 
-function addVideoStream(stream, id) {
-  const video = document.createElement('video');
-  video.srcObject = stream;
-  video.autoplay = true;
-  video.id = 'video-' + id;
-  videos.appendChild(video);
-}
+function createPeerConnection(id) {
+    const pc = new RTCPeerConnection();
+    peerConnections[id] = pc;
 
-// Mikrofon aç/kapat
-muteBtn.onclick = () => {
-  if (!localStream) return;
-  isMuted = !isMuted;
-  localStream.getAudioTracks()[0].enabled = !isMuted;
-  muteBtn.textContent = isMuted ? "Mikrofon Aç" : "Mikrofon Kapat";
-};
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-// Kamera aç/kapat
-videoBtn.onclick = () => {
-  if (!localStream) return;
-  isVideoOff = !isVideoOff;
-  localStream.getVideoTracks()[0].enabled = !isVideoOff;
-  videoBtn.textContent = isVideoOff ? "Kamera Aç" : "Kamera Kapat";
-};
-
-// Ekran paylaşımı
-screenBtn.onclick = async () => {
-  if (!localStream) return;
-  try {
-    const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-    const screenTrack = screenStream.getVideoTracks()[0];
-    for (let id in peers) {
-      const sender = peers[id]._pc.getSenders().find(s => s.track.kind === 'video');
-      if (sender) sender.replaceTrack(screenTrack);
-    }
-    screenTrack.onended = () => {
-      const videoTrack = localStream.getVideoTracks()[0];
-      for (let id in peers) {
-        const sender = peers[id]._pc.getSenders().find(s => s.track.kind === 'video');
-        if (sender) sender.replaceTrack(videoTrack);
-      }
+    pc.ontrack = (event) => {
+        let audio = document.createElement('audio');
+        audio.srcObject = event.streams[0];
+        audio.autoplay = true;
+        document.body.appendChild(audio);
     };
-  } catch (err) {
-    console.log("Ekran paylaşımı iptal edildi", err);
-  }
-};
 
-// Mesaj gönder
-sendBtn.onclick = () => {
-  if (!messageInput.value) return;
-  socket.emit('message', { room: roomID, text: messageInput.value });
-  addMessage('Ben: ' + messageInput.value);
-  messageInput.value = '';
-};
+    pc.onicecandidate = (event) => {
+        if(event.candidate) {
+            socket.send(JSON.stringify({
+                type: 'ice-candidate',
+                candidate: event.candidate,
+                to: id
+            }));
+        }
+    };
 
-messageInput.addEventListener('keypress', e => {
-  if (e.key === 'Enter') sendBtn.click();
-});
+    return pc;
+}
 </script>
-
 </body>
 </html>
