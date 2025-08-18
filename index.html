@@ -8,7 +8,7 @@
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: #202225;
+      background: #2f3136;
       color: white;
       display: flex;
       justify-content: center;
@@ -18,79 +18,63 @@
     #login {
       text-align: center;
     }
-    #login input {
+    #nickname {
       padding: 10px;
-      border-radius: 10px;
       border: none;
+      border-radius: 5px;
       margin-bottom: 10px;
+      text-align: center;
     }
     #joinBtn {
       font-family: 'Luckiest Guy', cursive;
-      font-size: 24px;
-      background: #5865f2;
+      font-size: 22px;
+      background: black;
       color: white;
       padding: 10px 20px;
       border: none;
-      border-radius: 10px;
+      border-radius: 5px;
       cursor: pointer;
     }
     #app {
       display: none;
-      width: 100%;
-      height: 100%;
-      grid-template-columns: 200px 1fr;
-      grid-template-rows: 1fr 150px;
-      grid-template-areas:
-        "users chat"
-        "users input";
-    }
-    #users {
-      grid-area: users;
-      background: #2f3136;
-      padding: 10px;
-      overflow-y: auto;
+      flex-direction: column;
+      width: 700px;
     }
     #chat {
-      grid-area: chat;
-      padding: 10px;
-      overflow-y: auto;
-      border-bottom: 1px solid #444;
-    }
-    #messageForm {
-      grid-area: input;
-      display: flex;
-      background: #2f3136;
-    }
-    #messageForm input {
+      background: #1e1f22;
       flex: 1;
       padding: 10px;
-      border: none;
+      overflow-y: auto;
+      border-radius: 5px;
+      font-size: 14px;
+      height: 400px;
     }
-    #messageForm button {
-      background: #5865f2;
-      border: none;
-      color: white;
-      padding: 10px 20px;
-      cursor: pointer;
+    #chat div {
+      margin: 4px 0;
+    }
+    #chat a {
+      color: #4fa3ff;
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <!-- Nick giriş ekranı -->
+  <!-- Giriş ekranı -->
   <div id="login">
     <input type="text" id="nickname" placeholder="Nickini gir">
     <br>
     <button id="joinBtn">Aramaya Katıl</button>
   </div>
 
-  <!-- Asıl uygulama -->
+  <!-- Ana uygulama -->
   <div id="app">
-    <div id="users"></div>
-    <div id="chat"></div>
-    <form id="messageForm">
-      <input id="msgInput" placeholder="Mesaj yaz...">
-      <button type="submit">Gönder</button>
-    </form>
+    <div id="chat">
+      <!-- Geçmiş mesaj gibi görünen açıklamalar -->
+      <div>NeoChat'e hoşgeldin!</div>
+      <div>Burası arkadaşlarınla konuşabileceğin,</div>
+      <div>Ve mesajlaşabilceğin bir yer!</div>
+      <div><a href="https://example.com" target="_blank">Haydi oyun başlasın!</a></div>
+    </div>
   </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -102,10 +86,7 @@
     const appDiv = document.getElementById("app");
     const joinBtn = document.getElementById("joinBtn");
     const nicknameInput = document.getElementById("nickname");
-    const usersDiv = document.getElementById("users");
     const chatDiv = document.getElementById("chat");
-    const msgForm = document.getElementById("messageForm");
-    const msgInput = document.getElementById("msgInput");
 
     let nickname = "";
 
@@ -114,28 +95,17 @@
       if (!nickname) return alert("Nick girmelisin!");
       socket.emit("join", nickname);
       loginDiv.style.display = "none";
-      appDiv.style.display = "grid";
+      appDiv.style.display = "flex";
       startVoice();
     };
 
-    // Kullanıcı listesi güncelle
-    socket.on("userlist", (list) => {
-      usersDiv.innerHTML = list.map(u => `<div>${u}</div>`).join("");
-    });
-
     // Sohbet mesajı al
     socket.on("chat", (data) => {
-      chatDiv.innerHTML += `<div><b>${data.nick}:</b> ${data.msg}</div>`;
+      // URL varsa tıklanabilir hale getir
+      let msg = data.msg.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
+      chatDiv.innerHTML += `<div><b>${data.nick}:</b> ${msg}</div>`;
       chatDiv.scrollTop = chatDiv.scrollHeight;
     });
-
-    // Mesaj gönder
-    msgForm.onsubmit = (e) => {
-      e.preventDefault();
-      if (msgInput.value.trim() === "") return;
-      socket.emit("chat", { nick: nickname, msg: msgInput.value });
-      msgInput.value = "";
-    };
 
     // WebRTC ses
     const peers = {};
