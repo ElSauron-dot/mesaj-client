@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Sesli Arama</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
     body {
       margin: 0;
@@ -17,49 +18,20 @@
     }
     #login, #lobby { display: none; }
     #login.active, #lobby.active { display: flex; flex-direction: column; align-items: center; }
-    input {
-      padding: 10px;
-      font-size: 16px;
-      margin-bottom: 10px;
-      border: none;
-      border-radius: 5px;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #userList {
-      margin-top: 20px;
-    }
-    .user {
-      display: flex;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    .indicator {
-      width: 15px;
-      height: 15px;
-      border-radius: 50%;
-      background: black;
-      margin-right: 10px;
-      border: 1px solid white;
-    }
-    .indicator.active {
-      background: dodgerblue;
-    }
+    input { padding: 10px; font-size: 16px; margin-bottom: 10px; border: none; border-radius: 5px; }
+    button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
+    #userList { margin-top: 20px; }
+    .user { display: flex; align-items: center; margin-bottom: 10px; }
+    .indicator { width: 15px; height: 15px; border-radius: 50%; background: black; margin-right: 10px; border: 1px solid white; }
+    .indicator.active { background: dodgerblue; }
   </style>
 </head>
 <body>
-  <!-- Nick girme ekranı -->
   <div id="login" class="active">
     <input type="text" id="nickname" placeholder="Nickinizi girin">
     <button id="joinBtn">ARAMAYA KATIL</button>
   </div>
 
-  <!-- Lobi ekranı -->
   <div id="lobby">
     <h2>Katılımcılar</h2>
     <div id="userList"></div>
@@ -72,8 +44,8 @@
     const nicknameInput = document.getElementById("nickname");
     const userList = document.getElementById("userList");
 
-    let users = {};
     let localNick = "";
+    const socket = io("https://801c592f-3316-4feb-a60b-cefc84cd55d4-00-223dh0258b37j.pike.replit.dev/"); // kendi Replit URL’in
 
     joinBtn.addEventListener("click", () => {
       const nick = nicknameInput.value.trim();
@@ -84,22 +56,19 @@
       localNick = nick;
       loginDiv.classList.remove("active");
       lobbyDiv.classList.add("active");
-
-      // Kullanıcıyı listeye ekle
-      addUser(localNick);
-
-      // Mikrofondan ses algılama başlat
+      socket.emit("join", localNick);
       initMic();
     });
 
-    function addUser(nick) {
-      if (users[nick]) return;
-      const div = document.createElement("div");
-      div.className = "user";
-      div.innerHTML = `<div class="indicator" id="ind-${nick}"></div> ${nick}`;
-      userList.appendChild(div);
-      users[nick] = div;
-    }
+    socket.on("userList", (list) => {
+      userList.innerHTML = "";
+      list.forEach((u) => {
+        const div = document.createElement("div");
+        div.className = "user";
+        div.innerHTML = `<div class="indicator ${u.talking ? "active" : ""}"></div> ${u.nick}`;
+        userList.appendChild(div);
+      });
+    });
 
     async function initMic() {
       try {
@@ -108,20 +77,12 @@
         const source = audioContext.createMediaStreamSource(stream);
         const analyser = audioContext.createAnalyser();
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
         source.connect(analyser);
 
         function checkVolume() {
           analyser.getByteFrequencyData(dataArray);
           let volume = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          const indicator = document.getElementById(`ind-${localNick}`);
-          if (indicator) {
-            if (volume > 10) { // eşik değer
-              indicator.classList.add("active");
-            } else {
-              indicator.classList.remove("active");
-            }
-          }
+          socket.emit("talking", volume > 10);
           requestAnimationFrame(checkVolume);
         }
         checkVolume();
