@@ -5,25 +5,15 @@
   <title>Sesli Arama</title>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <style>
-    body {
-      margin: 0;
-      background: black;
-      color: white;
-      font-family: Arial, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      flex-direction: column;
-    }
-    #login, #lobby { display: none; }
-    #login.active, #lobby.active { display: flex; flex-direction: column; align-items: center; }
-    input { padding: 10px; font-size: 16px; margin-bottom: 10px; border: none; border-radius: 5px; }
-    button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
-    #userList { margin-top: 20px; }
-    .user { display: flex; align-items: center; margin-bottom: 10px; }
-    .indicator { width: 15px; height: 15px; border-radius: 50%; background: black; margin-right: 10px; border: 1px solid white; }
-    .indicator.active { background: dodgerblue; }
+    body { margin:0; background:black; color:white; font-family:Arial; display:flex; justify-content:center; align-items:center; height:100vh; flex-direction:column;}
+    #login, #lobby { display:none; flex-direction:column; align-items:center;}
+    #login.active, #lobby.active { display:flex;}
+    input { padding:10px; font-size:16px; margin-bottom:10px; border:none; border-radius:5px;}
+    button { padding:10px 20px; font-size:16px; border:none; border-radius:5px; cursor:pointer;}
+    #userList { margin-top:20px;}
+    .user { display:flex; align-items:center; margin-bottom:10px;}
+    .indicator { width:15px; height:15px; border-radius:50%; background:black; margin-right:10px; border:1px solid white;}
+    .indicator.active { background:dodgerblue;}
   </style>
 </head>
 <body>
@@ -45,51 +35,111 @@
     const userList = document.getElementById("userList");
 
     let localNick = "";
-    const socket = io("https://801c592f-3316-4feb-a60b-cefc84cd55d4-00-223dh0258b37j.pike.replit.dev/"); // kendi Replit URL’in
+    const socket = io("https://801c592f-3316-4feb-a60b-cefc84cd55d4-00-223dh0258b37j.pike.replit.dev");
+    const peers = {};
 
-    joinBtn.addEventListener("click", () => {
+    let localStream;
+
+    joinBtn.addEventListener("click", async () => {
       const nick = nicknameInput.value.trim();
-      if (!nick) {
-        alert("Lütfen nick giriniz!");
-        return;
-      }
+      if(!nick){ alert("Lütfen nick giriniz!"); return; }
       localNick = nick;
       loginDiv.classList.remove("active");
       lobbyDiv.classList.add("active");
-      socket.emit("join", localNick);
-      initMic();
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+        initVoiceDetection(localStream);
+        socket.emit("join", localNick);
+      } catch(err){ alert("Mikrofon erişimi reddedildi: " + err); }
     });
 
-    socket.on("userList", (list) => {
+    // Kullanıcı listesi
+    socket.on("userList", list => {
       userList.innerHTML = "";
-      list.forEach((u) => {
+      list.forEach(u => {
         const div = document.createElement("div");
         div.className = "user";
-        div.innerHTML = `<div class="indicator ${u.talking ? "active" : ""}"></div> ${u.nick}`;
+        div.innerHTML = `<div class="indicator ${u.talking ? "active" : ""}"></div> ${u.nick} (${u.ip})`;
         userList.appendChild(div);
+
+        if(u.nick !== localNick && !peers[u.nick]){
+          createPeer(u.nick, true);
+        }
       });
     });
 
-    async function initMic() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        source.connect(analyser);
+    // Ses algılama
+    function initVoiceDetection(stream){
+      const audioContext = new (window.AudioContext||window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      source.connect(analyser);
 
-        function checkVolume() {
-          analyser.getByteFrequencyData(dataArray);
-          let volume = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          socket.emit("talking", volume > 10);
-          requestAnimationFrame(checkVolume);
+      function checkVolume(){
+        analyser.getByteFrequencyData(dataArray);
+        const volume = dataArray.reduce((a,b)=>a+b,0)/dataArray.length;
+        socket.emit("talking", volume>10);
+        requestAnimationFrame(checkVolume);
+      }
+      checkVolume();
+    }
+
+    // WebRTC peer oluşturma
+    function createPeer(targetNick, isInitiator){
+      const pc = new RTCPeerConnection();
+      localStream.getTracks().forEach(track=>pc.addTrack(track, localStream));
+
+      pc.ontrack = e=>{
+        let audioEl = document.getElementById("audio-" + targetNick);
+        if(!audioEl){
+          audioEl = document.createElement("audio");
+          audioEl.id = "audio-" + targetNick;
+          audioEl.autoplay = true;
+          document.body.appendChild(audioEl);
         }
-        checkVolume();
-      } catch (err) {
-        alert("Mikrofon erişimi reddedildi: " + err);
+        audioEl.srcObject = e.streams[0];
+      };
+
+      pc.onicecandidate = e=>{
+        if(e.candidate){
+          socket.emit("ice-candidate",{to:targetNick,candidate:e.candidate,from:localNick});
+        }
+      };
+
+      peers[targetNick] = pc;
+
+      if(isInitiator){
+        pc.createOffer().then(offer=>{
+          pc.setLocalDescription(offer);
+          socket.emit("offer",{to:targetNick,offer:offer,from:localNick});
+        });
       }
     }
+
+    // WebRTC sinyalizasyonu
+    socket.on("offer", async data=>{
+      if(data.to===localNick){
+        createPeer(data.from,false);
+        await peers[data.from].setRemoteDescription(data.offer);
+        const answer = await peers[data.from].createAnswer();
+        await peers[data.from].setLocalDescription(answer);
+        socket.emit("answer",{to:data.from,answer:answer,from:localNick});
+      }
+    });
+
+    socket.on("answer", async data=>{
+      if(data.to===localNick){
+        await peers[data.from].setRemoteDescription(data.answer);
+      }
+    });
+
+    socket.on("ice-candidate", async data=>{
+      if(data.to===localNick){
+        await peers[data.from].addIceCandidate(data.candidate);
+      }
+    });
   </script>
 </body>
 </html>
